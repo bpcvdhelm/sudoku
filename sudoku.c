@@ -1,452 +1,216 @@
-#include <stdarg.h>
+/*----------------------------------------------------------------------------*/
+/* sudoku.c (c) 2021 Bernard van der Helm, The Hague, The Netherlands         */
+/*----------------------------------------------------------------------------*/
 #include <stdio.h>
 #include <stdlib.h>
 
+#ifdef __TRACE__
+#define Trace(...) printf(__VA_ARGS__)
+#else
+#define Trace(...)
+#endif
 
-#define sxy(sudoku, x, y) (sudoku[(x)/3][(y)/3][(x)%3][(y)%3])
-#define cxy(cell_candidate, x, y, n) (cell_candidate[(x)/3][(y)/3][(x)%3][(y)%3][(n)])
+#define AllPremiseBitsOn 0x1ff
+#define X 0
+#define Y 1
+
+
+/*----------------------------------------------------------------------------*/
+/* cleared       : number of premises cleared so far                          */
+/* premise_bit   : conversion from bit position to number, 0->1...8->9        */
+/* cell_premise  : premises in bit positions, 0x01->1, 0x10->2, ..., 0x100->9 */
+/* cell_premises : number of premises in cell                                 */
+/* block_premises: number of premises in block                                */
+/* line_premises : number of premises in line x and y                         */
+/*----------------------------------------------------------------------------*/
 
 typedef struct
 {
-    int block_candidate[3][3][10];
-    int cell_candidate[3][3][3][3][10];
-    int sudoku[3][3][3][3];
+    int cleared;
+    int premise_bit[9];
+    
+    int cell_premise[3][3][3][3];
+
+    int cell_premises[3][3][3][3];
+    int block_premises[3][3][9];
+    int line_premises[2][9][9];
 }
 Sudoku;
 
-/*---------------------------------------------------------------------------*/
-/* clear.c                                                                   */
-/*---------------------------------------------------------------------------*/
-int clear(Sudoku *sudoku);
-int clear_block_double_cell(Sudoku *sudoku, int xb, int yb, int xc, int yc, ...);
-int clear_block_alligned_block(Sudoku *sudoku, int xb, int yb, ...);
-int clear_candidate(Sudoku *sudoku, int xb, int yb, int xc, int yc, int c);
-int clear_filled_cell(Sudoku *sudoku, int xb, int yb, int xc, int yc, ...);
-int clear_line_double_cell(Sudoku *sudoku, int xb, int yb, int xc, int yc, ...);
-int clear_unique_block_double_cell(Sudoku *sudoku, int xb, int yb, int xc, int yc, ...);
+/* common functions */
+int all_blocks(Sudoku *s, int (*block_function)(Sudoku *s, int xb, int yb));
+int all_cells(Sudoku *s, int (*cell_function)(Sudoku *s, int xb, int yb, int xc, int yc));
+int number(int premise_bit);
 
-/*---------------------------------------------------------------------------*/
-/* s.c                                                                       */
-/*---------------------------------------------------------------------------*/
-int all_blocks(Sudoku *sudoku, int (*block_function)(Sudoku *sudoku, int xb, int yb, ...), ...);
-int all_cells(Sudoku *sudoku, int (*cell_function)(Sudoku *sudoku, int xb, int yb, int xc, int yc, ...), ...);
-int fill(Sudoku *sudoku);
-int init(Sudoku *sudoku);
-int init_cell(Sudoku *sudoku, int xb, int yb, int xc, int yc, ...);
-int print(Sudoku *sudoku);
-int print_cell(Sudoku *sudoku, int xb, int yb, int xc, int yc, ...);
-int resolve(Sudoku *sudoku);
+/* core functions */
+int deduce(Sudoku *s);
+int fill(Sudoku *s);
+int init(Sudoku *s);
+int main(void);
+int print(Sudoku *s);
+int print_cell(Sudoku *s, int xb, int yb, int xc, int yc);
 
-/*---------------------------------------------------------------------------*/
-/* solve.c                                                                   */
-/*---------------------------------------------------------------------------*/
-int solve(Sudoku *sudoku);
-int solve_block(Sudoku *sudoku, int xb, int yb, ...);  
+/* clear functions */
+int clear_premise(Sudoku *s, int xb, int yb, int xc, int yc, int p, char *reason);
+int verify(Sudoku *s);
+int verify_block(Sudoku *s, int xb, int yb);
+int verify_cell(Sudoku *s, int xb, int yb, int xc, int yc);
+int verify_xline(Sudoku *s);
+int verify_yline(Sudoku *s);
 
-int clear(Sudoku *sudoku)
-{
-    #ifdef __TRACE__
-        printf("clear()\n");
-        printf("clear_filled()\n");
-    #endif 
-    if(all_cells(sudoku, clear_filled_cell))
-        return 1;
-    #ifdef __TRACE__
-        printf("clear_block_alligned()\n");
-    #endif 
-    if(all_blocks(sudoku, clear_block_alligned_block))
-        return 1;
-    #ifdef __TRACE__
-        printf("clear_block_double()\n");
-    #endif 
-    #ifdef __TRACE__
-        printf("clear_unique_block_double()\n");
-    #endif 
-    if(all_cells(sudoku, clear_unique_block_double_cell))
-        return 1;
-    if(all_cells(sudoku, clear_block_double_cell))
-        return 1;
-    #ifdef __TRACE__
-        printf("clear_line_double()\n");
-    #endif 
-    if(all_cells(sudoku, clear_line_double_cell))
-        return 1;
-    return 0;
+/* deduce block functions */
+int deduce_block_exclusive_block(Sudoku *s, int xb, int yb);
+int deduce_block_exclusive_group_cell(Sudoku *s, int xb, int yb, int xc, int yc);
+int deduce_block_group_cell(Sudoku *s, int xb, int yb, int xc, int yc);
+int deduce_block_solved_cell(Sudoku *s, int xb, int yb, int xc, int yc);
+
+/* deduce line functions */
+int deduce_xline_block_group_block(Sudoku *s, int xb, int yb);
+int deduce_yline_block_group_block(Sudoku *s, int xb, int yb);
+int deduce_xline_group_cell(Sudoku *s, int xb, int yb, int xc, int yc);
+int deduce_yline_group_cell(Sudoku *s, int xb, int yb, int xc, int yc);
+int deduce_xline_exclusive_group_cell(Sudoku *s, int xb, int yb, int xc, int yc);
+int deduce_yline_exclusive_group_cell(Sudoku *s, int xb, int yb, int xc, int yc);
+
+
+/* sample sudokus */
+#define S1 \
+{\
+    {0,0,0, 8,9,0, 0,0,0},\
+    {4,7,3, 2,0,0, 0,0,0},\
+    {0,1,0, 6,0,0, 0,0,0},\
+\
+    {5,0,2, 0,7,0, 0,0,0},\
+    {0,8,0, 0,0,0, 4,9,0},\
+    {0,0,0, 0,0,8, 0,0,0},\
+\
+    {0,0,0, 0,0,0, 0,0,3},\
+    {0,6,1, 4,0,9, 0,0,7},\
+    {0,0,8, 0,0,0, 0,0,2}\
 }
 
-int clear_block_alligned_block(Sudoku *sudoku, int xb, int yb, ...)
-{
-    int rc;
-    int xl;
-    int yl;
-
-    for(int n = 1; n < 10; n++)
-    {
-        if(sudoku -> block_candidate[xb][yb][n] < 2 || sudoku -> block_candidate[xb][yb][n] > 3)
-            continue;
-        xl = -1;
-        yl = -1;
-        for(int xc = 0; xc < 3; xc++)
-        {
-            for(int yc = 0; yc < 3; yc++)
-            {
-                if(sudoku -> cell_candidate[xb][yb][xc][yc][n] == n)
-                {
-                    if(xl == -1)
-                        xl = xc;
-                    else
-                    {
-                        if(xl != xc)
-                            xl = -2;
-                    }
-                    if(yl == -1)
-                        yl = yc;
-                    else
-                    {
-                        if(yl != yc)
-                            yl = -2;
-                    }
-                }
-            }
-        }
-        if(xl >= 0)
-        {
-            printf("  found %d%d: x%d: %d\n", xb, yb, xl, n);
-            for(int i = 0; i < 9; i++)
-            {
-                if(yb == i / 3)
-                    continue;
-                if(clear_candidate(sudoku, xb, i / 3, xl, i % 3, n))
-                    rc = 1;
-            }
-        if(yl >= 0)
-        {
-            printf("  found %d%d: y%d: %d\n", xb, yb, yl, n);
-            for(int i = 0; i < 9; i++)
-            {
-                if(xb == i / 3)
-                    continue;
-                if(clear_candidate(sudoku, i / 3, yb, i % 3, yl, n))
-                    rc = 1;
-            }
-        }
-            
-        }
-    }
-    return rc;
+#define S2 \
+{\
+    {0,0,0, 8,2,0, 0,0,0},\
+    {0,0,0, 7,0,0, 0,1,6},\
+    {2,0,0, 4,0,0, 0,0,0},\
+\
+    {6,0,0, 5,0,0, 0,0,0},\
+    {7,8,0, 6,9,0, 0,0,0},\
+    {0,5,4, 0,0,0, 8,0,2},\
+\
+    {0,7,0, 0,0,0, 0,8,0},\
+    {0,2,0, 0,7,6, 0,5,0},\
+    {0,0,9, 0,0,0, 0,0,1}\
 }
 
-int clear_block_double_cell(Sudoku *sudoku, int xb, int yb, int xc, int yc, ...)
-{
-    int c1;
-    int c2;
-    int n;
-    int rc;
-
-    if(sudoku -> cell_candidate[xb][yb][xc][yc][0] != 2)
-        return 0;
-    rc = 0;
-    for(int x = xc; x < 3; x++)
-    {
-        for(int y = yc; y < 3; y++)
-        {
-            if(sudoku -> cell_candidate[xb][yb][x][y][0] != 2)
-                continue;
-            if(xc == x && yc == y)
-                continue;
-            c1 = 0;
-            c2 = 0;
-            for(n = 1; n < 10; n++)
-            {
-                if(sudoku -> cell_candidate[xb][yb][xc][yc][n] != sudoku -> cell_candidate[xb][yb][x][y][n])
-                    break;
-                if(sudoku -> cell_candidate[xb][yb][xc][yc][n])
-                {
-                    if(c1 == 0)
-                        c1 = sudoku -> cell_candidate[xb][yb][xc][yc][n];
-                    else
-                        c2 = sudoku-> cell_candidate[xb][yb][xc][yc][n];
-                }
-            }
-            if(n == 10)
-            {
-                #if __TRACE__
-                    printf("  found %d%d%d%d-%d%d%d%d %d-%d\n", xb, yb, xc, yc, xb, yb, x, y, c1, c2);
-                #endif
-                for(int _x = 0; _x < 3; _x++)
-                {
-                    for(int _y = 0; _y < 3; _y++)
-                    {
-                        if(_x == xc && _y == yc)
-                            continue;
-                        if(_x == x && _y == y)
-                            continue;
-                        if(clear_candidate(sudoku, xb, yb, _x, _y, c1))
-                            rc = 1;
-                        if(clear_candidate(sudoku, xb, yb, _x, _y, c2))
-                            rc = 1;
-                    }
-                }
-                if(xc == x)
-                {
-                    for(int i = 0; i < 9; i++)
-                    {
-                        if(yb == i / 3)
-                        {
-                            if(yc == i % 3 || y == i % 3)
-                                continue;
-                        }
-                        if(clear_candidate(sudoku, xb, i / 3, xc, i % 3, c1))
-                            rc = 1;
-                        if(clear_candidate(sudoku, xb, i / 3, xc, i % 3, c2))
-                            rc = 1;
-                    }
-                }
-                else if(yc == y)
-                {
-                    for(int i = 0; i < 9; i++)
-                    {
-                        if(xb == i / 3)
-                        {
-                            if(xc == i % 3 || x == i % 3)
-                                continue;
-                        }
-                        if(clear_candidate(sudoku, i / 3, yb, i % 3, yc, c1))
-                            rc = 1;
-                        if(clear_candidate(sudoku, i / 3, yb, i % 3, yc, c2))
-                            rc = 1;
-                    }
-                }
-            }
-        }
-    }
-    return rc;
+#define S3 \
+{\
+    {0,0,0, 7,8,5, 6,0,0},\
+    {0,0,8, 0,0,0, 0,0,4},\
+    {0,6,0, 0,0,0, 0,0,0},\
+\
+    {4,1,0, 0,0,8, 2,0,0},\
+    {0,0,0, 0,0,0, 0,3,0},\
+    {0,0,0, 0,0,2, 0,7,0},\
+\
+    {0,9,0, 3,6,1, 0,0,0},\
+    {0,0,0, 0,0,0, 5,0,7},\
+    {0,0,2, 9,0,0, 0,0,0}\
 }
 
-int clear_candidate(Sudoku *sudoku, int xb, int yb, int xc, int yc, int c)
-{
-    if(sudoku -> cell_candidate[xb][yb][xc][yc][c])
-    {
-        #ifdef __TRACE__
-            printf("  clear %d%d%d%d: %d\n", xb, yb, xc, yc, c);
-        #endif
-        sudoku -> block_candidate[xb][yb][c]--;
-        sudoku -> cell_candidate[xb][yb][xc][yc][c] = 0;
-        sudoku -> cell_candidate[xb][yb][xc][yc][0]--;
-        return 1;
-    }
-    return 0;
+#define S4 \
+{\
+    {0,0,0, 4,0,0, 0,0,0},\
+    {0,5,0, 7,0,0, 0,0,9},\
+    {0,0,0, 9,0,8, 6,0,1},\
+\
+    {9,6,4, 0,0,0, 0,8,0},\
+    {0,0,7, 0,0,0, 9,0,0},\
+    {0,0,0, 0,0,0, 0,0,0},\
+\
+    {3,1,0, 0,0,2, 0,0,0},\
+    {0,0,0, 8,0,0, 0,0,7},\
+    {2,0,0, 0,0,0, 1,0,3}\
 }
 
-int clear_filled_cell(Sudoku *sudoku, int xb, int yb, int xc, int yc, ...)
-{
-    int ch;
-    int rc;
-
-    ch = sudoku -> sudoku[xb][yb][xc][yc];
-    if(ch == 0)
-      return 0;
-    rc = 0;
-    for(int n = 1; n < 10; n++)
-    {
-        if(clear_candidate(sudoku, xb, yb, xc, yc, n))
-            rc = 1;
-    }
-    for(int x = 0; x < 3; x++)
-    {
-        for(int y = 0; y < 3; y++)
-        {
-            if(clear_candidate(sudoku, xb, yb, x, y, ch))
-                rc = 1;
-        }
-    }
-    for(int i = 0; i < 9; i++)
-    {
-        if(clear_candidate(sudoku, xb, i / 3, xc, i % 3, ch))
-            rc = 1;
-        if(clear_candidate(sudoku, i / 3, yb, i % 3, yc, ch))
-            rc = 1;
-    }
-    return rc;
+#define S5 \
+{\
+    {0,0,0, 0,0,0, 9,4,0},\
+    {6,0,0, 0,0,0, 2,7,0},\
+    {8,2,0, 0,4,9, 6,0,0},\
+\
+    {0,7,4, 0,0,0, 0,0,0},\
+    {1,0,0, 7,6,0, 0,0,0},\
+    {0,6,2, 0,0,5, 0,8,0},\
+\
+    {0,0,0, 0,5,7, 0,2,3},\
+    {0,0,0, 0,0,0, 0,0,0},\
+    {7,5,3, 2,0,4, 0,0,0}\
 }
 
-int clear_line_double_cell(Sudoku *sudoku, int xb, int yb, int xc, int yc, ...)
-{
-
-    int c1;
-    int c2;
-    int n;
-    int rc;
-
-    if(sudoku -> cell_candidate[xb][yb][xc][yc][0] != 2)
-        return 0;
-    rc = 0;
-    for(int i = xb * 3 + xc; i < 9; i++)
-    {
-        if(xb == i / 3)
-            continue;
-        c1 = 0;
-        c2 = 0;
-        for(n = 1; n < 10; n++)
-        {
-            if(sudoku -> cell_candidate[xb][yb][xc][yc][n] != sudoku -> cell_candidate[i / 3][yb][i % 3][yc][n])
-                break;          
-            if(sudoku -> cell_candidate[xb][yb][xc][yc][n])
-            {
-                if(c1 == 0)
-                    c1 = sudoku -> cell_candidate[xb][yb][xc][yc][n];
-                else
-                    c2 = sudoku -> cell_candidate[xb][yb][xc][yc][n];
-            }
-        }
-        if(n == 10)  
-        {
-            printf("  found x %d%d%d%d-%d%d%d%d %d-%d\n", xb, yb, xc, yc, i / 3, yb, i % 3, yc, c1, c2);
-            for(int j = 0; j < 9; j++)
-            {
-                if(xb == j / 3 && xc == j % 3)
-                    continue;
-                if(i == j)
-                    continue;
-                if(clear_candidate(sudoku, j / 3, yb, j % 3, yc, c1))
-                    rc = 1;
-                if(clear_candidate(sudoku, j / 3, yb, j % 3, yc, c2))
-                    rc = 1;
-            }
-        }
-    }
-    for(int i = yb * 3 + yc; i < 9; i++)
-    {
-        if(yb == i / 3)
-            continue;
-        c1 = 0;
-        c2 = 0;
-        for(n = 1; n < 10; n++)
-        {
-            if(sudoku -> cell_candidate[xb][yb][xc][yc][n] != sudoku -> cell_candidate[xb][i / 3][xc][i % 3][n])
-                break;          
-            if(sudoku -> cell_candidate[xb][yb][xc][yc][n])
-            {
-                if(c1 == 0)
-                    c1 = sudoku -> cell_candidate[xb][yb][xc][yc][n];
-                else
-                    c2 = sudoku -> cell_candidate[xb][yb][xc][yc][n];
-            }
-        }
-        if(n == 10)  
-        {
-            printf("  found y %d%d%d%d-%d%d%d%d %d-%d\n", xb, yb, xc, yc, xb, i / 3, yb, i % 3, c1, c2);
-            for(int j = 0; j < 9; j++)
-            {
-                if(yb == j / 3 && yc == j % 3)
-                    continue;
-                if(i == j)
-                    continue;
-                if(clear_candidate(sudoku, xb, j / 3, yc, j % 3, c1))
-                    rc = 1;
-                if(clear_candidate(sudoku, xb, j / 3, yc, j % 3, c2))
-                    rc = 1;
-            }
-        }
-    }
-    return rc;
+#define S6 \
+{\
+    {0,0,0, 0,0,0, 0,0,0},\
+    {0,0,0, 0,0,0, 0,0,0},\
+    {0,0,0, 0,0,0, 0,0,0},\
+\
+    {0,0,0, 0,0,0, 0,0,0},\
+    {0,0,0, 0,0,0, 0,0,0},\
+    {0,0,0, 0,0,0, 0,0,0},\
+\
+    {0,0,0, 0,0,0, 0,0,0},\
+    {0,0,0, 0,0,0, 0,0,0},\
+    {0,0,0, 0,0,0, 0,0,0}\
 }
 
-int clear_unique_block_double_cell(Sudoku *sudoku, int xb, int yb, int xc, int yc, ...)
-{
-    int c1;
-    int c2;
-    int rc;
-
-    rc = 0;
-    c1 = 0;
-    c2 = 0;
-
-    if(sudoku -> sudoku[xb][yb][xc][yc] != 0)
-        return 0;
-    for(int n = 1; n < 10; n++)
-    {
-        if(sudoku -> block_candidate[xb][yb][n] != 2)
-            continue;
-        if(sudoku -> cell_candidate[xb][yb][xc][yc][n] == 0)
-            continue;
-        if(c1 == 0)
-            c1 = n;
-        else
-            c2 = n;
-    }
-    if(c1 && c2)
-        printf("  -found %d%d%d%d: %d%d\n", xb, yb, xc, yc, c1, c2);
-    return rc;
+#define S \
+{\
+    {0,0,0, 0,0,0, 0,4,7},\
+    {0,0,0, 0,0,3, 0,0,8},\
+    {0,9,0, 0,0,6, 0,0,0},\
+\
+    {0,6,4, 0,8,0, 0,5,0},\
+    {0,0,5, 0,0,0, 7,9,0},\
+    {0,0,0, 0,6,2, 0,0,0},\
+\
+    {1,0,0, 8,0,0, 0,0,0},\
+    {4,0,2, 1,0,0, 0,0,0},\
+    {0,0,0, 0,0,0, 5,0,4}\
 }
 
 
-int solve(Sudoku *sudoku)
-{
-    #ifdef __TRACE__
-        printf("solve()\n");
-    #endif
-    if(all_blocks(sudoku, solve_block))
-        return 1;
-    return 0;
-}
-
-int solve_block(Sudoku *sudoku, int xb, int yb, ...)
+/*----------------------------------------------------------------------------*/
+/* all_blocks                                                                 */
+/*----------------------------------------------------------------------------*/
+int all_blocks(Sudoku *s, int (*block_function)(Sudoku *s, int xb, int yb))
 {
     int rc;
 
     rc = 0;
-    for(int n = 1; n < 10; n++)
-    {
-        if(sudoku -> block_candidate[xb][yb][n] != 1)
-            continue;
-        for(int xc = 0; xc < 3; xc++)
-        {
-            for(int yc = 0; yc < 3; yc++)
-            {
-                if(sudoku -> cell_candidate[xb][yb][xc][yc][n])
-                {
-                    #ifdef __TRACE__
-                        printf("  solve %d%d%d%d: %d\n", xb, yb, xc, yc, n);
-                    #endif
-                    sudoku -> sudoku[xb][yb][xc][yc] = n;
-                    rc = 1;
-                    xc = 3;
-                    yc = 3;
 
-                }
-            }
-        }
-    }
-    return rc;
-}
-
-int all_blocks(Sudoku *sudoku, int (*block_function)(Sudoku *sudoku, int xb, int yb, ...), ...)
-{
-    va_list args;
-    int rc;
-
-    va_start(args, block_function);
-    rc = 0;
+    /* execute function on all blocks */
     for(int xb = 0; xb < 3; xb++)
     {
         for(int yb = 0; yb < 3; yb++)
         {
-            if(block_function(sudoku, xb, yb, args))
+            if(block_function(s, xb, yb))
                 rc = 1;
         }
     }
-    va_end(args);
     return rc;
 }
 
-int all_cells(Sudoku *sudoku, int (*cell_function)(Sudoku *sudoku, int xb, int yb, int xc, int yc, ...), ...)
+/*----------------------------------------------------------------------------*/
+/* all_cells                                                                  */
+/*----------------------------------------------------------------------------*/
+int all_cells(Sudoku *s, int (*cell_function)(Sudoku *s, int xb, int yb, int xc, int yc))
 {
-    va_list args;
     int rc;
 
-    va_start(args, cell_function);
     rc = 0;
+
+    /* execute function on all cells */
     for(int xb = 0; xb < 3; xb++)
     {
         for(int yb = 0; yb < 3; yb++)
@@ -455,117 +219,974 @@ int all_cells(Sudoku *sudoku, int (*cell_function)(Sudoku *sudoku, int xb, int y
             {
                 for(int yc = 0; yc < 3; yc++)
                 {
-                    if(cell_function(sudoku, xb, yb, xc, yc, args))
+                    if(cell_function(s, xb, yb, xc, yc))
                         rc = 1;
                 }
             }
         }
     }
-    va_end(args);
     return rc;
 }
 
-int fill(Sudoku *sudoku)
+/*----------------------------------------------------------------------------*/
+/* clear_premise                                                              */
+/*----------------------------------------------------------------------------*/
+int clear_premise(Sudoku *s, int xb, int yb, int xc, int yc, int p, char *reason)
 {
+    if(s -> cell_premise[xb][yb][xc][yc] & s -> premise_bit[p])
+    {
+        /* clear premise */
+        Trace("    clear (%3d/648) c%d%d%d%d p%d %s\n", s -> cleared + 1, xb, yb, xc, yc, p + 1, reason);
+        
+        s -> cleared++;
+        
+        s -> cell_premise[xb][yb][xc][yc] &= ~s -> premise_bit[p];
+
+        s -> cell_premises[xb][yb][xc][yc]--;
+        s -> block_premises[xb][yb][p]--;
+        s -> line_premises[X][yb * 3 + yc][p]--;
+        s -> line_premises[Y][xb * 3 + xc][p]--;
+
+        #ifdef __TRACE__
+            /* check integrity */
+            verify(s);
+        #endif
+
+        return 1;
+    }
+    return 0;
+}
+
+/*----------------------------------------------------------------------------*/
+/* deduce                                                                     */
+/*----------------------------------------------------------------------------*/
+int deduce(Sudoku *s)
+{
+    Trace("deduce()\n");
+
+    /* deduce blocks */
+    Trace("deduce_block_solved()\n");
+    if(all_cells(s, deduce_block_solved_cell))
+        return 1;
+    Trace("deduce_block_groups()\n");
+    if(all_cells(s, deduce_block_group_cell))
+        return 1;
+    Trace("deduce_block_exclusives()\n");
+    if(all_blocks(s, deduce_block_exclusive_block))
+        return 1;
+    Trace("deduce_block_exclusive_groups()\n");
+    if(all_cells(s, deduce_block_exclusive_group_cell))
+        return 1;
+
+    /* deduce lines */
+    Trace("deduce_xline_groups()\n");
+    if(all_cells(s, deduce_xline_group_cell))
+        return 1;
+    Trace("deduce_yline_groups()\n");
+    if(all_cells(s, deduce_yline_group_cell))
+        return 1;
+    Trace("deduce_xline_block_groups()\n");
+    if(all_blocks(s, deduce_xline_block_group_block))
+        return 1;
+    Trace("deduce_yline_block_groups()\n");
+    if(all_blocks(s, deduce_yline_block_group_block))
+        return 1;
+    Trace("deduce_xline_exclusive_groups()\n");
+    if(all_cells(s, deduce_xline_exclusive_group_cell))
+        return 1;
+    Trace("deduce_yline_exclusive_groups()\n");
+    if(all_cells(s, deduce_yline_exclusive_group_cell))
+        return 1;   
+
+    return 0;
+}
+
+/*----------------------------------------------------------------------------*/
+/* deduce_block_exclusive_block                                               */
+/*----------------------------------------------------------------------------*/
+int deduce_block_exclusive_block(Sudoku *s, int xb, int yb)
+{
+    int rc;
+
+    rc = 0;
+
+    /* find premise unique in block */
+    for(int p = 0; p < 9; p++)
+    {
+        /* check if this is a block exclusive */
+        if(s -> block_premises[xb][yb][p] == 1)
+        {
+            Trace("  found b%d%d p%d\n", xb, yb, p + 1);
+
+            /* we found an excusive cell within the block */
+            for(int xc = 0; xc < 3; xc++)
+            {
+                for(int yc = 0; yc < 3; yc++)
+                {
+                    /* make it also a cell exclusive */
+                    if(s -> cell_premise[xb][yb][xc][yc] & s -> premise_bit[p])
+                    {
+                        for(int p2 = 0; p2 < 9; p2++)
+                        {
+                            if(p2 != p)
+                            {
+                                if(clear_premise(s, xb, yb, xc, yc, p2, "deduce_block_exclusive_block()"))
+                                    rc = 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return rc;
+}
+
+/*----------------------------------------------------------------------------*/
+/* deduce_block_solved_cell                                                   */
+/*----------------------------------------------------------------------------*/
+int deduce_block_solved_cell(Sudoku *s, int xb, int yb, int xc, int yc)
+{
+    int p;
+    int rc;
+
+    /* return if not deduced */
+    if(s -> cell_premises[xb][yb][xc][yc] != 1)
+        return 0;
+
+    /* clear deduced number in other block cells */
+    p = number(s -> cell_premise[xb][yb][xc][yc]);
+    rc = 0;
+
+    Trace("  found c%d%d%d%d p%d\n", xb, yb, xc, yc, p + 1);
+
+    /* clear other cells in block */
+    for(int x = 0; x < 3; x++)
+    {
+        for(int y = 0; y < 3; y++)
+        {
+            /* not yourself! */
+            if(x == xc && y == yc)
+                continue;
+            if(clear_premise(s, xb, yb, x, y, p, "deduce_block_solved_cell()"))
+                rc = 1;
+        }
+    }
+
+    return rc;
+}
+
+/*----------------------------------------------------------------------------*/
+/* deduce_xline_block_group_block                                             */
+/*----------------------------------------------------------------------------*/
+int deduce_xline_block_group_block(Sudoku *s, int xb, int yb)
+{
+    int l;
+    int rc;
+    int yc;
+
+    rc = 0;
+
+    /* find unique premises within the block x line  */
+    for(int p = 0; p < 9; p++)
+    {
+        l = -1;
+        for(yc = 0; yc < 3; yc++)
+        {
+            for(int xc = 0; xc < 3; xc++)
+            {
+                if(s -> cell_premise[xb][yb][xc][yc] & s -> premise_bit[p])
+                {
+                    if(l == -1)
+                    {
+                        l = yc;
+                        break;
+                    }
+                    else
+                    {
+                        l = -2;
+                        break;
+                    }
+                }
+            }
+            if(l == -2)
+                break;
+        }
+        if(l < 0)
+            continue;
+
+        Trace("  found b%d%d p%d y%d\n", xb, yb, p + 1, l);
+
+        /* found double clear these in other cells */
+        for(int i = 0; i < 9; i++)
+        {
+            if(xb == i / 3)
+                continue;
+            
+            if(clear_premise(s, i / 3, yb, i % 3, l, p, "deduce_xline_block_group_block()"))
+                rc = 1;
+        }
+    }
+
+    return rc;
+}
+
+/*----------------------------------------------------------------------------*/
+/* deduce_yline_block_group_block                                             */
+/*----------------------------------------------------------------------------*/
+int deduce_yline_block_group_block(Sudoku *s, int xb, int yb)
+{
+    int l;
+    int rc;
+
+    rc = 0;
+
+    /* find unique premises within the block y line  */
+    for(int p = 0; p < 9; p++)
+    {
+        l = -1;
+        for(int xc = 0; xc < 3; xc++)
+        {
+            for(int yc = 0; yc < 3; yc++)
+            {
+                if(s -> cell_premise[xb][yb][xc][yc] & s -> premise_bit[p])
+                {
+                    if(l == -1)
+                    {
+                        l = xc;
+                        break;
+                    }
+                    else
+                    {
+                        l = -2;
+                        break;
+                    }
+                }
+            }
+            if(l == -2)
+                break;
+        }
+        if(l < 0)
+            continue;
+
+        Trace("  found b%d%d p%d x%d\n", xb, yb, p + 1, l);
+
+        /* found double clear these in other cells */
+        for(int i = 0; i < 9; i++)
+        {
+            if(yb == i / 3)
+                continue;
+            if(clear_premise(s, xb, i / 3, l, i % 3, p, "deduce_yline_block_group_block()"))
+                rc = 1;
+        }
+    }
+
+    return rc;
+}
+
+/*----------------------------------------------------------------------------*/
+/* deduce_block_exclusive_group_cell                                          */
+/*----------------------------------------------------------------------------*/
+int deduce_block_exclusive_group_cell(Sudoku *s, int xb, int yb, int xc, int yc)
+{
+    int c;
+    int mask;
+    int rc;
+
+    rc = 0;
+
+    /* find group unique premises within block */
+    for(int size = 2; size < 8; size++)
+    {
+        c = 0;
+        mask = 0;
+        for(int p = 0; p < 9; p++)
+        {
+            if(s -> block_premises[xb][yb][p] == size && s -> cell_premise[xb][yb][xc][yc] & s -> premise_bit[p])
+            {
+                mask |= s -> premise_bit[p];
+                c++;
+            }
+        }
+        if(c != size)
+            continue;
+
+        /* does the group exist */
+        c = 0;
+        for(int xc2 = xc; xc2 < 3; xc2++)
+        {
+            for(int yc2 = yc; yc2 < 3; yc2++)
+            {
+                if((s -> cell_premise[xb][yb][xc2][yc2] & mask) == mask)
+                    c++;
+            }
+        }
+        if(c != size)
+            continue;
+
+        #ifdef __TRACE__
+        {
+            int first;
+        
+            first = 1;
+            printf("  found c%d%d%d%d ", xb, yb, xc, yc);
+            for(int p = 0; p < 9; p++)
+            {
+                if(mask & s -> premise_bit[p])
+                {
+                    if(first)
+                    {
+                        printf("p%d", p + 1);
+                        first = 0;
+                    }
+                    else printf("-p%d", p + 1);
+                }
+            }
+            printf("\n");
+        }
+        #endif
+
+        for(int xc2 = 0; xc2 < 3; xc2++)
+        {
+            for(int yc2 = 0; yc2 < 3; yc2++)
+            {
+                /* skip solved ones */
+                if(s -> cell_premises[xb][yb][xc2][yc2] == 1)
+                    continue;
+
+                /* clear premises */
+                for(int p = 0; p < 9; p++)
+                {
+                    if((s -> cell_premise[xb][yb][xc2][yc2] & mask) == mask)
+                    {
+                        /* clear non group premises within group members */
+                        if(!(mask & s -> premise_bit[p]))
+                        {
+                            if(clear_premise(s, xb, yb, xc2, yc2, p, "deduce_block_exclusive_group_cell() group member"))
+                                rc = 1;
+                        }                        
+                    }
+                    else
+                    {
+                        /* clear group premises within non group members */
+                        if(mask & s -> premise_bit[p])
+                        {
+                            if(clear_premise(s, xb, yb, xc2, yc2, p, "deduce_block_exclusive_group_cell() non group member"))
+                                rc = 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return rc;
+}
+
+/*----------------------------------------------------------------------------*/
+/* deduce_block_group_cell                                                    */
+/*----------------------------------------------------------------------------*/
+int deduce_block_group_cell(Sudoku *s, int xb, int yb, int xc, int yc)
+{
+    int c;
+    int mask;
+    int rc;
+
+    /* skip solved cells */
+    if(s -> cell_premises[xb][yb][xc][yc] == 1)
+        return 0;
+
+    /* find group premises within block */
+    c = 0;
+    mask = s -> cell_premise[xb][yb][xc][yc];
+    for(int xc2 = xc; xc2 < 3; xc2++)
+    {
+        for(int yc2 = yc; yc2 < 3; yc2++)
+        {
+            if(mask == s -> cell_premise[xb][yb][xc2][yc2])
+                c++;
+        }
+    }
+
+    /* check if this is a group */
+    if(s -> cell_premises[xb][yb][xc][yc] != c)
+        return 0;
+
     #ifdef __TRACE__
-        printf("fill()\n");
+    {
+        int first;
+    
+        first = 1;
+        printf("  found c%d%d%d%d ", xb, yb, xc, yc);
+        for(int p = 0; p < 9; p++)
+        {
+            if(mask & s -> premise_bit[p])
+            {
+                if(first)
+                {
+                    printf("p%d", p + 1);
+                    first = 0;
+                }
+                else printf("-p%d", p + 1);
+            }
+        }
+        printf("\n");
+    }
     #endif
-#if 1
-    int s[9][9] = 
+
+    /* clear the group premises in other cells */
+    rc = 0;
+    for(int xc2 = 0; xc2 < 3; xc2++)
+    {
+        for(int yc2 = 0; yc2 < 3; yc2++)
         {
-            {0,0,0, 8,9,0, 0,0,0},
-            {4,7,3, 2,0,0, 0,0,0},
-            {0,1,0, 6,0,0, 0,0,0},
+            /* skip solved ones */
+            if(s -> cell_premises[xb][yb][xc2][yc2] == 1)
+                continue;
 
-            {5,0,2, 0,7,0, 0,0,0},
-            {0,8,0, 0,0,0, 4,9,0},
-            {0,0,0, 0,0,8, 0,0,0},
+            /* skip cells part of the group */
+            if(s -> cell_premise[xb][yb][xc2][yc2] == mask)
+                continue;
 
-            {0,0,0, 0,0,0, 0,0,3},
-            {0,6,1, 4,0,9, 0,0,7},
-            {0,0,8, 0,0,0, 0,0,2}
-        };
-#else 
-    int s[9][9] = 
+            /* clear premises */
+            for(int p = 0; p < 9; p++)
+            {
+                if(mask & s -> premise_bit[p])
+                {
+                    if(clear_premise(s, xb, yb, xc2, yc2, p, "deduce_block_group_cell()"))
+                        rc = 1;
+                }
+            }
+        }
+    }
+
+    return rc;
+}
+
+/*----------------------------------------------------------------------------*/
+/* deduce_xline_exclusive_group_cell                                          */
+/*----------------------------------------------------------------------------*/
+int deduce_xline_exclusive_group_cell(Sudoku *s, int xb, int yb, int xc, int yc)
+{
+    int c;
+    int mask;
+    int rc;
+   
+
+    /* skip solved cells */
+    if(s -> cell_premises[xb][yb][xc][yc] == 1)
+        return 0;
+    
+    /* find group unique premises within x line */
+    rc = 0;
+
+    /* test all sizes, skip 1 and 9 */
+    for(int size = 2; size < 9; size++)
+    {
+        c = 0;
+        mask = 0;
+        for(int p = 0; p < 9; p++)
         {
-            {0,0,0, 0,0,0, 0,0,0},
-            {0,0,0, 0,0,0, 0,0,0},
-            {0,0,0, 0,0,0, 0,0,0},
+            if(s -> line_premises[X][yb * 3 + yc][p] == size && s -> cell_premise[xb][yb][xc][yc] & s -> premise_bit[p])
+            {
+                mask |= s -> premise_bit[p];
+                c++;
+            }
+        }
+        if(c != size)
+            continue;
 
-            {1,2,3, 0,0,0, 1,2,3},
-            {0,0,0, 0,5,6, 0,0,0},
-            {0,8,9, 0,0,0, 0,8,9},
+        /* does the group exist */
+        c= 0;
+        for(int x = xb * 3 + xc; x < 9; x++)
+        {
+            if((s -> cell_premise[x / 3][yb][x % 3][yc] & mask) == mask)
+                c++;
+        }
+        if(c != size)
+            continue;
 
-            {0,0,0, 0,0,0, 0,0,0},
-            {0,0,0, 0,0,0, 0,0,0},
-            {0,0,0, 0,0,0, 0,0,0}
-        };
-#endif
+        #ifdef __TRACE__
+        {
+            int first;
+        
+            first = 1;
+            printf("  found c%d%d%d%d ", xb, yb, xc, yc);
+            for(int p = 0; p < 9; p++)
+            {
+                if(mask & s -> premise_bit[p])
+                {
+                    if(first)
+                    {
+                        printf("p%d", p + 1);
+                        first = 0;
+                    }
+                    else printf("-p%d", p + 1);
+                }
+            }
+            printf("\n");
+        }
+        #endif
 
+        for(int x = 0; x < 9; x++)
+        {
+            /* skip solved ones */
+            if(s -> cell_premises[x / 3][yb][x % 3][yc] == 1)
+                continue;
+
+            /* clear premises */
+            for(int p = 0; p < 9; p++)
+            {
+                if((s -> cell_premise[x / 3][yb][x % 3][yc] & mask) == mask)
+                {
+                    /* clear non group premises within group members */
+                    if(!(mask & s -> premise_bit[p]))
+                    {
+                        if(clear_premise(s, x / 3, yb, x % 3, yc, p, "deduce_xline_exclusive_group_cell() group member"))
+                            rc = 1;
+                    }                        
+                }
+                else
+                {
+                    /* clear group premises within non group members */
+                    if(mask & s -> premise_bit[p])
+                    {
+                        if(clear_premise(s, x / 3, yb, x % 3, yc, p, "deduce_xline_exclusive_group_cell() non group member"))
+                            rc = 1;
+                    }
+                }
+            }
+        }
+    }
+    return rc;
+}
+
+/*----------------------------------------------------------------------------*/
+/* deduce_xline_groups                                                        */
+/*----------------------------------------------------------------------------*/
+int deduce_xline_group_cell(Sudoku *s, int xb, int yb, int xc, int yc)
+{
+    int c;
+    int mask;
+    int rc;
+
+    /* skip solved cells */
+    if(s -> cell_premises[xb][yb][xc][yc] == 1)
+        return 0;
+
+    /* find group premises within x line */
+    c = 0;
+    mask = s -> cell_premise[xb][yb][xc][yc];
+    for(int x = xb * 3 + xc; x < 9; x++)
+    {
+        if(mask == s -> cell_premise[x / 3][yb][x % 3][yc])
+            c++;
+    }
+
+    /* check if this is a group */
+    if(s -> cell_premises[xb][yb][xc][yc] != c)
+        return 0;
+
+    #ifdef __TRACE__
+    {
+        int first;
+    
+        first = 1;
+        printf("  found cx%dx%d ", yb, yc);
+        for(int p = 0; p < 9; p++)
+        {
+            if(mask & s -> premise_bit[p])
+            {
+                if(first)
+                {
+                    printf("p%d", p + 1);
+                    first = 0;
+                }
+                else printf("-p%d", p + 1);
+            }
+        }
+        printf("\n");
+    }
+    #endif
+
+    /* clear the group premises in other cells */
+    rc = 0;
+    for(int x = 0; x < 9; x++)
+    {
+         /* skip solved ones */
+         if(s -> cell_premises[x / 3][yb][x % 3][yc] == 1)
+             continue;
+
+          /* skip cells part of the group */
+          if(s -> cell_premise[x / 3][yb][x % 3][yc] == mask)
+              continue;
+
+        /* clear premises */
+        for(int p = 0; p < 9; p++)
+        {
+            if(mask & s -> premise_bit[p])
+            {
+                if(clear_premise(s, x / 3, yb, x % 3, yc, p, "deduce_xline_group_cell()"))
+                    rc = 1;
+        }
+        }
+    }
+
+    return rc;
+}
+
+/*----------------------------------------------------------------------------*/
+/* deduce_yline_exclusive_group_cell                                          */
+/*----------------------------------------------------------------------------*/
+int deduce_yline_exclusive_group_cell(Sudoku *s, int xb, int yb, int xc, int yc)
+{
+    int c;
+    int mask;
+    int rc;
+
+    /* skip solved cells */
+    if(s -> cell_premises[xb][yb][xc][yc] == 1)
+        return 0;
+
+    /* find exclusive group unique premises within y line */
+    rc = 0;
+
+    /* test all sizes, skip 1 and 9 */
+    for(int size = 2; size < 9; size++)
+    {
+        c = 0;
+        mask = 0;
+        for(int p = 0; p < 9; p++)
+        {
+            if(s -> line_premises[Y][xb * 3 + xc][p] == size && s -> cell_premise[xb][yb][xc][yc] & s -> premise_bit[p])
+            {
+                mask |= s -> premise_bit[p];
+                c++;
+            }
+        }
+        if(c != size)
+            continue;
+
+        /* does the group exist */
+        c= 0;
+        for(int y = yb * 3 + yc; y < 9; y++)
+        {
+            if((s -> cell_premise[xb][y / 3][xc][y % 3] & mask) == mask)
+                c++;
+        }
+        if(c != size)
+            continue;
+
+        #ifdef __TRACE__
+        {
+            int first;
+        
+            first = 1;
+            printf("  found c%d%d%d%d ", xb, yb, xc, yc);
+            for(int p = 0; p < 9; p++)
+            {
+                if(mask & s -> premise_bit[p])
+                {
+                    if(first)
+                    {
+                        printf("p%d", p + 1);
+                        first = 0;
+                    }
+                    else printf("-p%d", p + 1);
+                }
+            }
+            printf("\n");
+        }
+        #endif
+
+        for(int y = 0; y < 9; y++)
+        {
+            /* skip solved ones */
+            if(s -> cell_premises[xb][y / 3][xc][y % 3] == 1)
+                continue;
+
+            /* clear premises */
+            for(int p = 0; p < 9; p++)
+            {
+                if((s -> cell_premise[xb][y / 3][xc][y % 3] & mask) == mask)
+                {
+                    /* clear non group premises within group members */
+                    if(!(mask & s -> premise_bit[p]))
+                    {
+                        if(clear_premise(s, xb, y / 3, xc, y % 3, p, "deduce_yline_exclusive_group_cell() group member"))
+                            rc = 1;
+                    }                        
+                }
+                else
+                {
+                    /* clear group premises within non group members */
+                    if(mask & s -> premise_bit[p])
+                    {
+                        if(clear_premise(s, xb, y / 3, xc, y % 3, p, "deduce_yline_exclusive_group_cell() non group member"))
+                            rc = 1;
+                    }
+                }
+            }
+        }
+    }
+    return rc;
+}
+
+/*----------------------------------------------------------------------------*/
+/* deduce_yline_groups                                                        */
+/*----------------------------------------------------------------------------*/
+int deduce_yline_group_cell(Sudoku *s, int xb, int yb, int xc, int yc)
+{
+    int c;
+    int mask;
+    int rc;
+
+    /* skip solved cells */
+    if(s -> cell_premises[xb][yb][xc][yc] == 1)
+        return 0;
+
+    /* find group premises within y line */
+    c = 0;
+    mask = s -> cell_premise[xb][yb][xc][yc];
+    for(int y = yb * 3 + yc; y < 9; y++)
+    {
+        if(mask == s -> cell_premise[xb][y / 3][xc][y % 3])
+            c++;
+    }
+
+    /* check if this is a group */
+    if(s -> cell_premises[xb][yb][xc][yc] != c)
+        return 0;
+
+    #ifdef __TRACE__
+    {
+        int first;
+    
+        first = 1;
+        printf("  found c%dy%dy ", xb, xc);
+        for(int p = 0; p < 9; p++)
+        {
+            if(mask & s -> premise_bit[p])
+            {
+                if(first)
+                {
+                    printf("p%d", p + 1);
+                    first = 0;
+                }
+                else printf("-p%d", p + 1);
+            }
+        }
+        printf("\n");
+    }
+    #endif
+
+    /* clear the group premises in other cells */
+    rc = 0;
+    for(int y = 0; y < 9; y++)
+    {
+         /* skip solved ones */
+         if(s -> cell_premises[xb][y / 3][xc][y / 3] == 1)
+             continue;
+
+          /* skip cells part of the group */
+          if(s -> cell_premise[xb][y / 3][xc][y % 3] == mask)
+              continue;
+
+        /* clear premises */
+        for(int p = 0; p < 9; p++)
+        {
+            if(mask & s -> premise_bit[p])
+            {
+                if(clear_premise(s, xb, y / 3, xc, y % 3, p, "deduce_yline_group_cell()"))
+                    rc = 1;
+            }
+        }
+    }
+
+    return rc;
+}
+
+/*----------------------------------------------------------------------------*/
+/* fill                                                                       */
+/*----------------------------------------------------------------------------*/
+int fill(Sudoku *s)
+{
+    int rc;
+    int sudoku[9][9] = S;
+
+    Trace("fill()\n");
+    rc = 0;
     for(int x = 0; x < 9; x++)
     {
         for(int y = 0; y < 9; y++)
-            sxy(sudoku -> sudoku, x, y) = s[y][x];
+        {
+            if(sudoku[y][x])
+            {
+                Trace("  found c%d%d%d%d p%d\n", x / 3, y / 3, x % 3, y % 3, sudoku[y][x]);
+                for(int p = 0; p < 9; p++)
+                {
+                    /* clear all other premises within cell */
+                    if(p != sudoku[y][x] - 1)
+                    {
+                        if(clear_premise(s, x / 3, y / 3, x % 3, y % 3, p, "fill()"))
+                            rc = 1;
+                    }
+                }
+            }
+        }
     }
-    return 0;
+    return rc;
 }
 
-int init(Sudoku *sudoku)
+/*----------------------------------------------------------------------------*/
+/* init                                                                       */
+/*----------------------------------------------------------------------------*/
+int init(Sudoku *s)
 {
-    #ifdef __TRACE__
-        printf("init()\n");
-    #endif
-    return all_cells(sudoku, init_cell);
-}
+    Trace("init()\n");
 
-int init_cell(Sudoku *sudoku, int xb, int yb, int xc, int yc, ...)
-{
-    sudoku -> sudoku[xb][yb][xc][yc] = 0;
-    for(int n = 1; n < 10; n++)
-        sudoku -> cell_candidate[xb][yb][xc][yc][n] = n;
-    sudoku -> cell_candidate[xb][yb][xc][yc][0] = 9;
-    if(xc == 0 && yc ==0)
+    /* init cleared */
+    s -> cleared = 0;
+
+    /* init static premise premise_bits */
+    for(int p = 0; p < 9; p++)
+        s -> premise_bit[p] = 1 << p;
+    
+    /* init block_premises */
+    for(int xb = 0; xb < 3; xb++)
     {
-        for(int n = 1; n < 10; n++)
-                sudoku -> block_candidate[xb][yb][n] = 9;
+        for(int yb = 0; yb < 3; yb++)
+        {
+            for(int p = 0; p < 9; p++)
+                s -> block_premises[xb][yb][p] = 9;
+        }
     }
+
+    /* init cell_premise and cell_premises */
+    for(int xb = 0; xb < 3; xb++)
+    {
+        for(int yb = 0; yb < 3; yb++)
+        {
+            for(int xc = 0; xc < 3; xc++)
+            {
+                for(int yc = 0; yc < 3; yc++)
+                {
+                    s -> cell_premise[xb][yb][xc][yc] = AllPremiseBitsOn;
+                    s -> cell_premises[xb][yb][xc][yc] = 9;
+                }
+            }
+        }
+    }
+
+    /* init line_premises */
+    for(int xy = 0; xy < 9; xy++)
+    {
+        for(int p = 0; p < 9; p++)
+        {
+            s -> line_premises[X][xy][p] = 9;
+            s -> line_premises[Y][xy][p] = 9;
+        }
+    }
+
     return 0;
 }
 
+/*----------------------------------------------------------------------------*/
+/* main                                                                       */
+/*----------------------------------------------------------------------------*/
 int main(void)
 {
-    Sudoku sudoku;
+    Sudoku s;
+    
+    /* Initialize, print and fill */
+    init(&s);
+    print(&s);
+    fill(&s);
 
-    #ifdef __TRACE__
-        printf("main()\n");
-    #endif
-    init(&sudoku);
-    print(&sudoku);
-    fill(&sudoku);
+    /* print and deduce until deduced */
     do
-        print(&sudoku);
-    while(resolve(&sudoku));
-    return 0;
+    {
+        print(&s);
+    }
+    while (deduce(&s));
 }
 
-int print(Sudoku *sudoku)
+/*----------------------------------------------------------------------------*/
+/* number                                                                     */
+/*----------------------------------------------------------------------------*/
+int number(int p)
 {
+    /* return the bit position number */
+    if(p & 0x001)
+        return 0;
+    if(p & 0x002)
+        return 1;
+    if(p & 0x004)
+        return 2;
+    if(p & 0x008)
+        return 3;
+    if(p & 0x010)
+        return 4;
+    if(p & 0x020)
+        return 5;
+    if(p & 0x040)
+        return 6;
+    if(p & 0x080)
+        return 7;
+    if(p & 0x100)
+        return 8;
+    return -1;
+}
+
+/*----------------------------------------------------------------------------*/
+/* print                                                                      */
+/*----------------------------------------------------------------------------*/
+int print(Sudoku *s)
+{
+    int p;
+
+    Trace("print()\n");
+    printf("\n");
+
+    /* print sudoku */
     #ifdef __TRACE__
-        printf("print()\n");
+        /* print line statistics */
+        for(int p = 0; p < 9; p++)
+        {
+            printf("          ");
+            for(int x = 0; x < 9; x++)
+            {
+                if(x && x % 3 == 0)
+                    printf("  ");
+                printf(" %d", s -> line_premises[Y][x][p]);
+            }
+            printf("\n");
+        }
+        printf("         ");
     #endif
     printf(" -----------------------\n");
     for(int y = 0; y < 9; y++)
     {
         if(y && y % 3 == 0)
+        {
+            #ifdef __TRACE__
+                printf("         ");
+            #endif
             printf("|                       |\n");
+        }
+        #ifdef __TRACE__
+            for(int p = 0; p < 9; p++)
+            {
+                printf("%d", s -> line_premises[X][y][p]);
+            }
+        #endif
         for(int x = 0; x < 9; x++)
         {
             if(x && x % 3 == 0)
                 printf("  ");
             if(x == 0)
                 printf("|");
-            if(sxy(sudoku -> sudoku, x, y))
-                printf(" %d", sxy(sudoku -> sudoku, x, y));
+            if(s -> cell_premises[x / 3][y / 3][x % 3][y % 3] == 1)
+                printf(" %d", number(s -> cell_premise[x / 3][y / 3][x % 3][y % 3]) + 1);
             else
                 printf(" .");
             if(x == 8)
@@ -573,51 +1194,201 @@ int print(Sudoku *sudoku)
         }
         printf("\n");
     }
-    printf(" -----------------------\n");
     #ifdef __TRACE__
-        all_cells(sudoku, print_cell);
+        printf("         ");
+    #endif
+    printf(" -----------------------\n");
+
+    /* print cell statistics */
+    #ifdef __TRACE__
+        all_cells(s, print_cell);
         printf("\n");
     #endif
     return 0;
 }
 
-int print_cell(Sudoku *sudoku, int xb, int yb, int xc, int yc, ...)
+/*----------------------------------------------------------------------------*/
+/* print_cell                                                                 */
+/*----------------------------------------------------------------------------*/
+int print_cell(Sudoku *s, int xb, int yb, int xc, int yc)
 {
+    /* print block premises */
     if(xc == 0 && yc == 0)
     {
         printf("\n      ");
-        for(int n = 1; n < 10; n++)
+        for(int p = 0; p < 9; p++)
         {
-            if(sudoku -> block_candidate[xb][yb][n])
-                printf("%d", sudoku -> block_candidate[xb][yb][n]);
+            if(s -> block_premises[xb][yb][p])
+                printf("%d", s -> block_premises[xb][yb][p]);
             else
                 printf(".");
         }
         printf("\n");
     }    
+
+    /* print cell premises */
     printf("%d%d%d%d: ", xb, yb, xc, yc);
-    for(int n = 1; n < 10; n++)
+    for(int p = 0; p < 9; p++)
     {
-        if(sudoku -> cell_candidate[xb][yb][xc][yc][n])
-            printf("%d", sudoku -> cell_candidate[xb][yb][xc][yc][n]);
+        if(s -> cell_premise[xb][yb][xc][yc] & s -> premise_bit[p])
+            printf("%d", p + 1);
         else
             printf(".");
     }
-    if(sudoku -> cell_candidate[xb][yb][xc][yc][0])
-        printf("(%d)\n", sudoku -> cell_candidate[xb][yb][xc][yc][0]);
-    else
-        printf("(0)(%d)\n", sudoku -> sudoku[xb][yb][xc][yc]);
+
+    /* print cell premise size or sudoku value */
+    printf(" %d\n", s -> cell_premises[xb][yb][xc][yc]);
+
     return 0;
 }
 
-int resolve(Sudoku *sudoku)
+/*----------------------------------------------------------------------------*/
+/* verify                                                                     */
+/*----------------------------------------------------------------------------*/
+int verify(Sudoku *s)
 {
-    #ifdef __TRACE__
-        printf("resolve()\n");
-    #endif 
-    if(clear(sudoku))
+    /* check integrity */
+    if(all_blocks(s, verify_block))
+    {
+        printf("Integrity lost in block_premises\n");
+        exit(-1);
+    }
+    if(all_cells(s, verify_cell))
+    {
+        printf("Integrity lost in premises\n");
+        exit(-1);
+    }
+    if(verify_xline(s))
+    {
+        printf("Integrity lost in line_premises[X]\n");
+        exit(-1);
+    }
+    if(verify_yline(s))
+    {
+        printf("Integrity lost in line_premises[Y]\n");
+        exit(-1);
+    }
+    return 0;
+}
+
+/*----------------------------------------------------------------------------*/
+/* verify_block                                                               */
+/*----------------------------------------------------------------------------*/
+int verify_block(Sudoku *s, int xb, int yb)
+{
+    int block_premises[9];
+
+    for(int i = 0; i < 9; i++)
+        block_premises[i] = 0;
+    for(int xc = 0; xc < 3; xc++)
+    {
+        for(int yc = 0; yc < 3; yc++)
+        {
+            for(int p = 0; p < 9; p++)
+            {
+                if(s -> cell_premise[xb][yb][xc][yc] & s -> premise_bit[p])
+                    block_premises[p]++;
+            }
+        }
+    }
+    for(int p = 0; p < 9; p++)
+    {
+        if(block_premises[p] != s -> block_premises[xb][yb][p])
+            return 1;
+        if(block_premises[p] < 1 || block_premises[p] > 9)
+            return 1;
+    }
+    return 0;
+}
+
+/*----------------------------------------------------------------------------*/
+/* verify_cell                                                                */
+/*----------------------------------------------------------------------------*/
+int verify_cell(Sudoku *s, int xb, int yb, int xc, int yc)
+{
+    int premises;
+
+    premises = 0;
+    for(int p = 0; p < 9; p++)
+    {
+        if(s -> cell_premise[xb][yb][xc][yc] & s -> premise_bit[p])
+            premises++;
+    }
+    if(premises != s -> cell_premises[xb][yb][xc][yc])
         return 1;
-    if(solve(sudoku))
+    if(premises < 1 || premises > 9)
         return 1;
+    return 0;
+}
+
+/*----------------------------------------------------------------------------*/
+/* verify_xline                                                                */
+/*----------------------------------------------------------------------------*/
+int verify_xline(Sudoku *s)
+{
+    int line_premises[2][9][9];
+
+    for(int y = 0; y < 9; y++)
+    {
+        for(int p = 0; p < 9; p++)
+            line_premises[X][y][p] = 0;
+    }
+    for(int y = 0; y < 9; y++)
+    {
+        for(int p = 0; p < 9; p++)
+        {
+            for(int x = 0; x < 9; x++)
+            {
+                if(s -> cell_premise[x / 3][y / 3][x % 3][y % 3] & s -> premise_bit[p])
+                    line_premises[X][y][p]++;
+            }
+        }
+    }
+    for(int y = 0; y < 9; y++)
+    {
+        for(int p = 0; p < 9; p++)
+        {
+            if(line_premises[X][y][p] != s -> line_premises[X][y][p])
+                return 1;
+            if(line_premises[X][y][p] < 1 || line_premises[X][y][p] > 9)
+                return 1;
+        }
+    }
+    return 0;
+}
+
+/*----------------------------------------------------------------------------*/
+/* verify_yline                                                               */
+/*----------------------------------------------------------------------------*/
+int verify_yline(Sudoku *s)
+{
+    int line_premises[2][9][9];
+
+    for(int x = 0; x < 9; x++)
+    {
+        for(int p = 0; p < 9; p++)
+            line_premises[Y][x][p] = 0;
+    }
+    for(int x = 0; x < 9; x++)
+    {
+        for(int p = 0; p < 9; p++)
+        {
+            for(int y = 0; y < 9; y++)
+            {
+                if(s -> cell_premise[x / 3][y / 3][x % 3][y % 3] & s -> premise_bit[p])
+                    line_premises[Y][x][p]++;
+            }
+        }
+    }
+    for(int x = 0; x < 9; x++)
+    {
+        for(int p = 0; p < 9; p++)
+        {
+            if(line_premises[Y][x][p] != s -> line_premises[Y][x][p])
+                return 1;
+            if(line_premises[Y][x][p] < 1 || line_premises[Y][x][p] > 9)
+                return 1;
+        }
+    }
     return 0;
 }
