@@ -1,8 +1,8 @@
 # sudoku
 
-# update
+------------------------------------------------------------
 Hmmmm, just found a sudoku that wasn't solved by this logic. Investigation has learned me the logic x-wing, so there will be an update ;-)
-
+------------------------------------------------------------
 
 Sudoku solver up (and including) to the highest level
 
