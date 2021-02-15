@@ -72,6 +72,9 @@ int deduce_yline_group_cell(Sudoku *s, int xb, int yb, int xc, int yc);
 int deduce_xline_exclusive_group_cell(Sudoku *s, int xb, int yb, int xc, int yc);
 int deduce_yline_exclusive_group_cell(Sudoku *s, int xb, int yb, int xc, int yc);
 
+/* deduce xwing functions */
+int deduce_xwing_x(Sudoku *s);
+int deduce_xwing_y(Sudoku *s);
 
 /* sample sudokus */
 #define S1 \
@@ -164,7 +167,7 @@ int deduce_yline_exclusive_group_cell(Sudoku *s, int xb, int yb, int xc, int yc)
     {0,0,0, 0,0,0, 0,0,0}\
 }
 
-#define S \
+#define S7 \
 {\
     {0,0,0, 0,0,0, 0,4,7},\
     {0,0,0, 0,0,3, 0,0,8},\
@@ -179,6 +182,20 @@ int deduce_yline_exclusive_group_cell(Sudoku *s, int xb, int yb, int xc, int yc)
     {0,0,0, 0,0,0, 5,0,4}\
 }
 
+#define S \
+{\
+    {0,6,0, 0,9,0, 0,1,0},\
+    {5,0,0, 7,0,8, 0,0,9},\
+    {0,0,7, 0,0,0, 3,0,0},\
+\
+    {0,5,0, 0,6,0, 0,4,0},\
+    {4,0,0, 8,0,7, 0,0,5},\
+    {0,1,0, 0,2,0, 0,7,0},\
+\
+    {0,0,5, 0,0,0, 7,0,0},\
+    {2,0,0, 1,0,3, 0,0,4},\
+    {0,9,0, 0,7,0, 0,2,0}\
+}
 
 /*----------------------------------------------------------------------------*/
 /* all_blocks                                                                 */
@@ -297,6 +314,12 @@ int deduce(Sudoku *s)
     Trace("deduce_yline_exclusive_groups()\n");
     if(all_cells(s, deduce_yline_exclusive_group_cell))
         return 1;   
+
+    /* deduce x-wings */
+    if(deduce_xwing_x(s))
+        return 1;
+    if(deduce_xwing_y(s))
+        return 1;
 
     return 0;
 }
@@ -831,6 +854,158 @@ int deduce_xline_group_cell(Sudoku *s, int xb, int yb, int xc, int yc)
         }
     }
 
+    return rc;
+}
+
+/*----------------------------------------------------------------------------*/
+/* deduce_xwing_x                                                             */
+/*----------------------------------------------------------------------------*/
+int deduce_xwing_x(Sudoku *s)
+{
+    int i;
+    int rc;
+    int xw[6];
+
+    Trace("deduce_xwing_x()\n");
+
+    rc = 0;
+    for(int p = 0; p < 9; p++)
+    {
+        for(int y1 = 0; y1 < 9; y1++)
+        {
+            if(s -> line_premises[X][y1][p] == 2)
+            {
+                /* find first line positions */
+                xw[0] = y1;
+                i = 1;
+                for(int x1 = 0; x1 < 9; x1++)
+                {
+                    if(s -> cell_premise[x1 / 3][y1 / 3][x1 % 3][y1 % 3] & s->premise_bit[p])
+                        xw[i++] = x1;
+                }
+
+                /* remove previous find and find second line positions */
+                xw[4] = -1;
+                for(int y2 = y1 + 1; y2 < 9; y2++)
+                {
+                    if(s -> line_premises[X][y2][p] == 2)
+                    {
+                        xw[3] = y2;
+                        i = 4;
+                        for(int x2 = 0; x2 < 9; x2++)
+                        {
+                            if(s -> cell_premise[x2 / 3][y2 / 3][x2 % 3][y2 % 3] & s->premise_bit[p])
+                                xw[i++] = x2;
+                        }
+                    }
+                }
+                if(xw[1] == xw[4] && xw[2] == xw[5])
+                {
+                    Trace("  found: p:%d y1:%d x:%d,%d y2:%d x:%d,%d\n", p+1, xw[0], xw[1], xw[2], xw[3], xw[4], xw[5]);
+
+                    /* clear premises in x */
+                    for(int x = 0; x < 9; x++)
+                    {
+                        /* skip the xwing ones */
+                        if(x == xw[1] || x == xw[2])
+                            continue;
+                        if(clear_premise(s, x / 3, xw[0] / 3, x % 3, xw[0] % 3, p, "deduce_xwing_y() x1"))
+                            rc = 1;
+                        if(clear_premise(s, x / 3, xw[3] / 3, x % 3, xw[3] % 3, p, "deduce_xwing_y() x2"))
+                            rc = 1;
+                    }
+
+                    /* clear premises in y */
+                    for(int y = 0; y < 9; y++)
+                    {
+                        /* skip the xwing ones */
+                        if(y == xw[0] || y == xw[3])
+                            continue;
+                        if(clear_premise(s, xw[1] / 3, y / 3, xw[1] % 3, y % 3, p, "deduce_xwing_x() y1"))
+                            rc = 1;
+                        if(clear_premise(s, xw[2] / 3, y / 3, xw[2] % 3, y % 3, p, "deduce_xwing_x() y2"))
+                            rc = 1;
+                    }
+                }
+            }
+        }
+    }
+    return rc;
+}
+
+/*----------------------------------------------------------------------------*/
+/* deduce_xwing_y                                                             */
+/*----------------------------------------------------------------------------*/
+int deduce_xwing_y(Sudoku *s)
+{
+    int i;
+    int rc;
+    int xw[6];
+
+    Trace("deduce_xwing_y()\n");
+
+    rc = 0;
+    for(int p = 0; p < 9; p++)
+    {
+        for(int x1 = 0; x1 < 9; x1++)
+        {
+            if(s -> line_premises[Y][x1][p] == 2)
+            {
+                /* find first line positions */
+                xw[0] = x1;
+                i = 1;
+                for(int y1 = 0; y1 < 9; y1++)
+                {
+                    if(s -> cell_premise[x1 / 3][y1 / 3][x1 % 3][y1 % 3] & s->premise_bit[p])
+                        xw[i++] = y1;
+                }
+
+                /* remove previous find and find second line positions */
+                xw[4] = -1;
+                for(int x2 = x1 + 1; x2 < 9; x2++)
+                {
+                    if(s -> line_premises[Y][x2][p] == 2)
+                    {
+                        xw[3] = x2;
+                        i = 4;
+                        for(int y2 = 0; y2 < 9; y2++)
+                        {
+                            if(s -> cell_premise[x2 / 3][y2 / 3][x2 % 3][y2 % 3] & s->premise_bit[p])
+                                xw[i++] = y2;
+                        }
+                    }
+                }
+                if(xw[1] == xw[4] && xw[2] == xw[5])
+                {
+                    Trace("  found: p:%d x1:%d y:%d,%d x2:%d y:%d,%d\n", p+1, xw[0], xw[1], xw[2], xw[3], xw[4], xw[5]);
+
+                    /* clear premises in x */
+                    for(int x = 0; x < 9; x++)
+                    {
+                        /* skip the xwing ones */
+                        if(x == xw[0] || x == xw[3])
+                            continue;
+                        if(clear_premise(s, x / 3, xw[1] / 3, x % 3, xw[1] % 3, p, "deduce_xwing_y() x1"))
+                            rc = 1;
+                        if(clear_premise(s, x / 3, xw[2] / 3, x % 3, xw[2] % 3, p, "deduce_xwing_y() x2"))
+                            rc = 1;
+                    }
+
+                    /* clear premises in y */
+                    for(int y = 0; y < 9; y++)
+                    {
+                        /* skip the xwing ones */
+                        if(y == xw[1] || y == xw[2])
+                            continue;
+                        if(clear_premise(s, xw[0] / 3, y / 3, xw[0] % 3, y % 3, p, "deduce_xwing_x() y1"))
+                            rc = 1;
+                        if(clear_premise(s, xw[3] / 3, y / 3, xw[3] % 3, y % 3, p, "deduce_xwing_x() y2"))
+                            rc = 1;
+                    }
+                }
+            }
+        }
+    }
     return rc;
 }
 
