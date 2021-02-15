@@ -2,7 +2,7 @@
 
 ----update----
 
-Hmmmm, just found a sudoku that wasn't solved by this logic. Investigation has learned me the logic x-wing, so there will be an update ;-)
+The missing x-wing technique is added, but I see new needed techniques ;-). The next addition will be the swordfish.
 
 ----update----
 
